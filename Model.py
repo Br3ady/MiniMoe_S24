@@ -28,12 +28,8 @@ class Attn(nn.Module):
         super(Attn,self).__init__()
         d = config.n_embd
         self.W = nn.Linear(d,3*d)
-    def head(self,x):
+    def head(self,q,k,v):
         pass
-    def forward(self, x):
-         Q,K,V = torch.split(self.W(x),3)
-
-         
-
-        
-
+    def forward(self, X):
+        X = self.W(X)
+        Q,K,V = X.split()
