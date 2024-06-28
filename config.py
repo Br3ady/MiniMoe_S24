@@ -1,4 +1,4 @@
-class GPT2Config(object):
+class Config(object):
     def __init__(
             self,
             vocab_size_or_config_json_file=50257,

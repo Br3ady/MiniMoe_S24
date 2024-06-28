@@ -24,12 +24,40 @@ class LayerNorm(nn.Module):
         
 
 class Attn(nn.Module):
-    def __init__(self,config):
+    def __init__(self, config):
         super(Attn,self).__init__()
-        d = config.n_embd
-        self.W = nn.Linear(d,3*d)
-    def head(self,q,k,v):
-        pass
+        self.d = config.n_embd
+        self.h = config.n_head
+        assert self.d % self.h == 0
+        self.W1 = nn.Linear(self.d,3*self.d)
+        self.W2 = nn.Linear(self.d,self.d)
+
+    def reshape(self, x, k=False):
+        in_shape = x.size()[:-1] + (self.h, self.d // self.h)
+        x = x.view(in_shape)
+        if k:
+            x = x.permute(0,2,1,3)
+        else:
+            x = x.permute(0,2,3,1)
+        return x
+    
+    def cat(self, x):
+        out_shape = (x.size()[0],) + (x.size()[3],) + (x.size()[2]*x.size()[1],)
+        x = x.view(out_shape)
+        return x
+
+    def heads(self, q,k,v):
+        w = (torch.matmul(q,k)) / math.sqrt(q.size(-1))
+        w = nn.Softmax(dim=-1)(w)
+        return torch.matmul(w,v)
+
     def forward(self, X):
-        X = self.W(X)
-        Q,K,V = X.split()
+        X = self.W1(X)
+        Q,K,V = X.split(self.d,dim=2)
+        q = self.reshape(Q)
+        k = self.reshape(K,k=True)
+        v = self.reshape(V)
+
+        return self.heads(q,k,v)
+
+    
