@@ -63,6 +63,20 @@ class Attn(nn.Module):
 
 
 class FFN(nn.Module):
-    def __init__(self,config):
-        super(FFN,self).__init__()
+    def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
+        super(FFN, self).__init__()
+        nx = config.n_embd
+        self.c_fc = nn.Linear(n_state, nx)
+        self.c_proj = nn.Linear(nx, n_state)
+        self.act = gelu
+
+    def forward(self, x):
+        h = self.act(self.c_fc(x))
+        h2 = self.c_proj(h)
+        return h2
+
+class TopK_Route(nn.Module):
+    def __init__(self,nx,k):
+        super().__init__(TopK_Route, self)
+        self.p1 = nn.Linear(nx,)
 
