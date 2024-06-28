@@ -57,7 +57,12 @@ class Attn(nn.Module):
         q = self.reshape(Q)
         k = self.reshape(K,k=True)
         v = self.reshape(V)
+        out = self.heads(q,k,v)
+        out = self.cat(out)
+        return self.W2(out)
 
-        return self.heads(q,k,v)
 
-    
+class FFN(nn.Module):
+    def __init__(self,config):
+        super(FFN,self).__init__()
+
