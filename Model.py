@@ -75,8 +75,9 @@ class FFN(nn.Module):
         h2 = self.c_proj(h)
         return h2
 
+
 class TopK_Route(nn.Module):
     def __init__(self,nx,k):
         super().__init__(TopK_Route, self)
         self.p1 = nn.Linear(nx,)
-
+        
