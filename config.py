@@ -9,7 +9,10 @@ class Config(object):
             n_head=12,
             layer_norm_epsilon=1e-5,
             initializer_range=0.02,
-            n_exp=8
+            n_exp=8,
+            k = 2
+
+            
     ):
         self.vocab_size = vocab_size_or_config_json_file
         self.n_ctx = n_ctx
@@ -20,4 +23,5 @@ class Config(object):
         self.layer_norm_epsilon = layer_norm_epsilon
         self.initializer_range = initializer_range
         self.n_exp = n_exp
+        self.k = k
         

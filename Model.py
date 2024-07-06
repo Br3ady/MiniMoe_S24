@@ -74,10 +74,21 @@ class FFN(nn.Module):
         h = self.act(self.c_fc(x))
         h2 = self.c_proj(h)
         return h2
+    
 
-
-class TopK_Route(nn.Module):
-    def __init__(self,nx,k):
-        super().__init__(TopK_Route, self)
-        self.p1 = nn.Linear(nx,)
+class TopKRoute(nn.Module):
+    def __init__(self, config, k):
+        super(TopKRoute,self).__init__()
+        shape_flat = config.n_ctx * config.n_embd
+        self.k = k
+        self.W = nn.Linear(shape_flat, config.n_exp)
+        self.Softmax = torch.nn.Softmax(dim=1)
+    def forward(self,x):
+        y = torch.flatten(x,start_dim=1)
+        y = self.W(y)
+        vals,idx = torch.topk(y,k=self.k,dim=1)
+        mask = torch.zeros_like(y)
+        rows = torch.arange(idx.size(0)).unsqueeze(1)
+        mask[rows,idx] = vals
+        mask = self.Softmax(mask)
         
