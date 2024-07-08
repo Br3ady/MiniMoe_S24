@@ -63,7 +63,7 @@ class Attn(nn.Module):
 
 
 class FFN(nn.Module):
-    def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
+    def __init__(self, config, n_state):  # in MLP: n_state=3072 (4 * n_embd)
         super(FFN, self).__init__()
         nx = config.n_embd
         self.c_fc = nn.Linear(n_state, nx)
@@ -91,4 +91,16 @@ class TopKRoute(nn.Module):
         rows = torch.arange(idx.size(0)).unsqueeze(1)
         mask[rows,idx] = vals
         mask = self.Softmax(mask)
+        return mask
+
+class FFN_Experts(nn.Module):
+    def __init__(self, config, n_exp):
+        super(FFN_Experts,self).__init__()
+        self.n_epx = n_exp
+        self.experts = nn.ModuleList([FFN(config,config.n_embd*4) for _ in range(n_exp)])
+        self.route = TopKRoute(config, config.k)
+    def forward(self,x):
+        mask = self.route(x)
+        
+
         
