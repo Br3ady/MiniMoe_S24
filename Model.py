@@ -83,6 +83,7 @@ class TopKRoute(nn.Module):
         self.k = k
         self.W = nn.Linear(shape_flat, config.n_exp)
         self.Softmax = torch.nn.Softmax(dim=1)
+
     def forward(self,x):
         y = torch.flatten(x,start_dim=1)
         y = self.W(y)
@@ -93,14 +94,37 @@ class TopKRoute(nn.Module):
         mask = self.Softmax(mask)
         return mask
 
+
 class FFN_Experts(nn.Module):
     def __init__(self, config, n_exp):
         super(FFN_Experts,self).__init__()
         self.n_epx = n_exp
         self.experts = nn.ModuleList([FFN(config,config.n_embd*4) for _ in range(n_exp)])
         self.route = TopKRoute(config, config.k)
-    def forward(self,x):
-        mask = self.route(x)
-        
 
+    def forward(self,x):
+        mask = self.route(x) ###make sure flatten viabel 
+        x = self.experts(x) # n_exp x B x N x D
+        x = torch.dot(x,mask) # zero -k experts ###not comp efficent 
+        ###TODO needs to return B,N,D by avg x across weightes expert outputs
+        return x
+
+
+class Block(nn.Module):
+    def __inti__(self, config):
+        super(Block, self).__init__()
+        self.EXP = FFN_Experts(config,config.n_exp)
+        self.ATTN = Attn(config)
+        self.ln_1 = LayerNorm(config.n_emb)
+        self.ln_2 = LayerNorm(config.n_emb)
+    def forward(self,x):
+        a = self.ATTN(x)
+        x = self.ln_1(a+x) ###check add norm layer
+        m = self.EXP(x)
+        x = self.ln_2(m+x)
+
+
+class Model(nn.Module):
+    def __init__(self, config):
+        super(Model, self).__init__()
         
