@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import math
 
 
-
 def gelu(x):
     theta_x = (1+torch.nn.tanh(math.sqrt(2/math.pi) * (x+0.044715*torch.pow(x,3))))
     return 0.5 * x * theta_x
@@ -77,23 +76,19 @@ class FFN(nn.Module):
     
 
 class TopKRoute(nn.Module):
-    def __init__(self, config, k):
+    def __init__(self, in_dim, n_exp):
         super(TopKRoute,self).__init__()
-        shape_flat = config.n_ctx * config.n_embd
-        self.k = k
-        self.W = nn.Linear(shape_flat, config.n_exp)
-        self.Softmax = torch.nn.Softmax(dim=1)
+
+
+        self.W = nn.Linear(in_dim, n_exp)
+        self.Softmax = nn.Softmax(dim=1)
 
     def forward(self,x):
-        y = torch.flatten(x,start_dim=1)
-        y = self.W(y)
-        vals,idx = torch.topk(y,k=self.k,dim=1)
-        mask = torch.zeros_like(y)
-        rows = torch.arange(idx.size(0)).unsqueeze(1)
-        mask[rows,idx] = vals
-        mask = self.Softmax(mask)
-        return mask
-
+        scores = self.W(x)
+        scores = scores.mean(dim=1)
+        scores = self.Softmax(scores)
+        return(scores)
+    
 
 class FFN_Experts(nn.Module):
     def __init__(self, config, n_exp):
@@ -104,7 +99,7 @@ class FFN_Experts(nn.Module):
 
     def forward(self,x):
         mask = self.route(x) ###make sure flatten viabel 
-        x = self.experts(x) # n_exp x B x N x D
+        outs = torch.stack([expert(x) for expert in self.experts], dim=1)
         x = torch.dot(x,mask) # zero -k experts ###not comp efficent 
         ###TODO needs to return B,N,D by avg x across weightes expert outputs
         return x
@@ -127,4 +122,3 @@ class Block(nn.Module):
 class Model(nn.Module):
     def __init__(self, config):
         super(Model, self).__init__()
-        
