@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import math
 
 
+
 def gelu(x):
     theta_x = (1+torch.nn.tanh(math.sqrt(2/math.pi) * (x+0.044715*torch.pow(x,3))))
     return 0.5 * x * theta_x
@@ -65,44 +66,50 @@ class FFN(nn.Module):
     def __init__(self, config, n_state):  # in MLP: n_state=3072 (4 * n_embd)
         super(FFN, self).__init__()
         nx = config.n_embd
-        self.c_fc = nn.Linear(n_state, nx)
-        self.c_proj = nn.Linear(nx, n_state)
+        self.c_fc = nn.Linear(nx, n_state)
+        self.c_proj = nn.Linear(n_state, nx)
         self.act = gelu
 
     def forward(self, x):
         h = self.act(self.c_fc(x))
         h2 = self.c_proj(h)
         return h2
-    
+
 
 class TopKRoute(nn.Module):
-    def __init__(self, in_dim, n_exp):
+    def __init__(self, nx, n_exp, k):
         super(TopKRoute,self).__init__()
-
-
-        self.W = nn.Linear(in_dim, n_exp)
+        self.W = nn.Linear(nx, n_exp)
         self.Softmax = nn.Softmax(dim=1)
+        self.k = k
 
     def forward(self,x):
         scores = self.W(x)
         scores = scores.mean(dim=1)
         scores = self.Softmax(scores)
-        return(scores)
+        vals,idx = torch.topk(scores, self.k, dim=-1)
+        return vals, idx
     
 
 class FFN_Experts(nn.Module):
     def __init__(self, config, n_exp):
         super(FFN_Experts,self).__init__()
-        self.n_epx = n_exp
+        self.n_exp = n_exp
+        nx = config.n_embd
         self.experts = nn.ModuleList([FFN(config,config.n_embd*4) for _ in range(n_exp)])
-        self.route = TopKRoute(config, config.k)
+        self.route = TopKRoute(nx, n_exp, config.k)
 
     def forward(self,x):
-        mask = self.route(x) ###make sure flatten viabel 
-        outs = torch.stack([expert(x) for expert in self.experts], dim=1)
-        x = torch.dot(x,mask) # zero -k experts ###not comp efficent 
-        ###TODO needs to return B,N,D by avg x across weightes expert outputs
-        return x
+        B,N,D = x.size()
+        vals,idx = self.route(x)
+        idx = idx.unsqueeze(1).expand(-1,N,-1) # reshape to [B,N,k] for matmul w/ expert output
+        ### TODO Data parallel 
+        outs = torch.stack([expert(x) for expert in self.experts],dim=1)
+        k_outs = torch.gather(outs, 1, idx.unsqueeze(-1).expand(-1, -1, -1, outs.size(-1)))  # Shape: (B, N, k, expert_dim)
+        k_vals = vals.unsqueeze(1).unsqueeze(-1).expand(-1,N,-1,k_outs.size(-1))
+        out = (k_vals * k_outs).sum(dim=2)
+        return out
+        
 
 
 class Block(nn.Module):
