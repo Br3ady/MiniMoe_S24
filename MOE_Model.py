@@ -52,20 +52,15 @@ class Attn(nn.Module):
         w = nn.Softmax(dim=-1)(w)
         return torch.matmul(w,v)
 
-    def forward(self, X, past=None):
+    def forward(self, X):
         X = self.W1(X)
         Q,K,V = X.split(self.d,dim=2)
         q = self.reshape(Q)
         k = self.reshape(K,k=True)
         v = self.reshape(V)
-        if past is not None: 
-            past_k, past_v = past[0].transpose(-2,-1), past[1] # transpose k bc computes transposed and stored untransposed 
-            v = torch.cat(past[0],v)
-            k = torch.cat(past[1],k)
-        present = torch.stack((k.tanspose(-2,-1),v))
         out = self.heads(q,k,v)
         out = self.cat(out)
-        return self.W2(out) , present
+        return self.W2(out)
 
 
 class FFN(nn.Module):
@@ -80,19 +75,54 @@ class FFN(nn.Module):
         h = self.act(self.c_fc(x))
         h2 = self.c_proj(h)
         return h2
+
+
+class TopKRoute(nn.Module):
+    def __init__(self, nx, n_exp, k):
+        super(TopKRoute,self).__init__()
+        self.W = nn.Linear(nx, n_exp)
+        self.Softmax = nn.Softmax(dim=1)
+        self.k = k
+
+    def forward(self,x):
+        scores = self.W(x)
+        scores = scores.mean(dim=1)
+        scores = self.Softmax(scores)
+        vals,idx = torch.topk(scores, self.k, dim=-1)
+        return vals, idx
     
+
+class FFN_Experts(nn.Module):
+    def __init__(self, config, n_exp):
+        super(FFN_Experts,self).__init__()
+        self.n_exp = n_exp
+        nx = config.n_embd
+        self.experts = nn.ModuleList([FFN(config,config.n_embd*4) for _ in range(n_exp)])
+        self.route = TopKRoute(nx, n_exp, config.k)
+
+    def forward(self,x):
+        B,N,D = x.size()
+        vals,idx = self.route(x)
+        idx = idx.unsqueeze(1).expand(-1,N,-1) # reshape to [B,N,k] for matmul w/ expert output
+        ### TODO Data parallel 
+        outs = torch.stack([expert(x) for expert in self.experts],dim=1)
+        k_outs = torch.gather(outs, 1, idx.unsqueeze(-1).expand(-1, -1, -1, outs.size(-1)))  # Shape: (B, N, k, expert_dim)
+        k_vals = vals.unsqueeze(1).unsqueeze(-1).expand(-1,N,-1,k_outs.size(-1))
+        out = (k_vals * k_outs).sum(dim=2)
+        return out # B,N,D
+        
 
 class Block(nn.Module):
     def __init__(self, config):
         super(Block, self).__init__()
-        self.FFN = FFN(config,config.n_exp)
+        self.EXP = FFN_Experts(config,config.n_exp)
         self.ATTN = Attn(config)
         self.ln_1 = LayerNorm(config.n_emb)
         self.ln_2 = LayerNorm(config.n_emb)
     def forward(self,x):
         a = self.ATTN(x)
-        x = self.ln_1(a+x) 
-        m = self.FFN(x)
+        x = self.ln_1(a+x) ###check add norm layer
+        m = self.EXP(x)
         x = self.ln_2(m+x)
 
 
@@ -144,5 +174,3 @@ class GPT2Model(nn.Module):
         hidden_states = self.ln_f(hidden_states)
         output_shape = input_shape + (hidden_states.size(-1),)
         return hidden_states.view(*output_shape), presents    
-    
-    
