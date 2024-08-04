@@ -96,9 +96,9 @@ class Block(nn.Module):
         x = self.ln_2(m+x)
 
 
-class GPT2Model(nn.Module):
+class Model(nn.Module):
     def __init__(self, config):
-        super(GPT2Model, self).__init__()
+        super(Model, self).__init__()
         self.n_layer = config.n_layer
         self.n_embd = config.n_embd
         self.n_vocab = config.vocab_size
@@ -106,7 +106,7 @@ class GPT2Model(nn.Module):
         self.wte = nn.Embedding(config.vocab_size, config.n_embd) # learnable weight matrix that can contain all embeddings
         self.wpe = nn.Embedding(config.n_positions, config.n_embd) # weights like x
         block = Block(config.n_ctx, config, scale=True)
-        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)]) # layers of blocks
+        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)])
         self.ln_f = LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
     def set_embeddings_weights(self, model_embeddings_weights):
@@ -124,7 +124,6 @@ class GPT2Model(nn.Module):
             position_ids = torch.arange(past_length, input_ids.size(-1) + past_length, dtype=torch.long,
                                         device=input_ids.device)
             position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
-
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_ids.size(-1))
         position_ids = position_ids.view(-1, position_ids.size(-1))
@@ -145,4 +144,28 @@ class GPT2Model(nn.Module):
         output_shape = input_shape + (hidden_states.size(-1),)
         return hidden_states.view(*output_shape), presents    
     
-    
+
+class Head():
+    def __inti__(self, emb_weights, config):
+        super(Head, self).__inti__()
+        self.n_emb = config.n_emb
+        self.set_emb_weights(emb_weights)
+    def set_emb_weights(self,emb_weights):
+        shape = emb_weights.shape
+        self.embed = nn.Linear(shape[1],shape[0], bias=False)
+        self.embed.weight = emb_weights
+    def forward(self, hidden):
+        return self.embed(hidden)
+
+
+class Heads_Model():
+    def __init__(self,config):
+        super(Heads_Model,self).__init__()
+        self.model = Model(config)
+        token_weights = self.model.wte.weight ### TODO get how this deffed / passed in 
+        self.head = Head(token_weights, config)
+
+    def set_tied(self): ### TODO what tied weights do
+        self.head.set_emb_weights(self.model.wte.weight)
+
+    def forward(self, input_ids, position_ids=None, token_type = None, lables = None, past=None):
