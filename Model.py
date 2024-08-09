@@ -96,7 +96,7 @@ class Block(nn.Module):
         x = self.ln_2(m+x)
 
 
-class Model(nn.Module):
+class Model(nn.Module): ## GPT architecture 
     def __init__(self, config):
         super(Model, self).__init__()
         self.n_layer = config.n_layer
@@ -128,14 +128,14 @@ class Model(nn.Module):
         input_ids = input_ids.view(-1, input_ids.size(-1))
         position_ids = position_ids.view(-1, position_ids.size(-1))
 
-        inputs_embeds = self.wte(input_ids)
-        position_embeds = self.wpe(position_ids)
-        if token_type_ids is not None:
+        inputs_embeds = self.wte(input_ids) ## get input emb for vocab through lin proj
+        position_embeds = self.wpe(position_ids) ## ^^ for position emb 
+        if token_type_ids is not None: 
             token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1))
             token_type_embeds = self.wte(token_type_ids)
         else:
             token_type_embeds = 0
-        hidden_states = inputs_embeds + position_embeds + token_type_embeds
+        hidden_states = inputs_embeds + position_embeds + token_type_embeds # sum all projections to get input
         presents = []
         for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
@@ -159,20 +159,20 @@ class Head():
 
 
 class Heads_Model():
-    def __init__(self,config):
-        super(Heads_Model,self).__init__()
-        self.model = Model(config)
-        token_weights = self.model.wte.weight ### TODO get how this deffed / passed in 
-        self.head = Head(token_weights, config)
+    def __init__(self, config):
+        super(Heads_Model, self).__init__()
+        self.transformer = Model(config)
+        self.lm_head = Head(self.transformer.wte.weight, config)
 
-    def set_tied(self): ### TODO what tied weights do
-        self.head.set_emb_weights(self.model.wte.weight)
+    def set_tied(self):
+        self.lm_head.set_embeddings_weights(self.transformer.wte.weight)
 
-    def forward(self, input_ids, position_ids=None, token_type = None, labels = None, past=None):
-        hidden_states, presents = self.transformer(input_ids, position_ids, token_type, past)
+    def forward(self, input_ids, position_ids=None, token_type_ids=None, lm_labels=None, past=None):
+        hidden_states, presents = self.transformer(input_ids, position_ids, token_type_ids, past)
         lm_logits = self.lm_head(hidden_states)
-        if labels is not None:
+        if lm_labels is not None:
             loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
-            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), lm_labels.view(-1))
             return loss
         return lm_logits, presents
+    
