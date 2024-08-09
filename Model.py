@@ -149,8 +149,8 @@ class Head():
     def __inti__(self, emb_weights, config):
         super(Head, self).__inti__()
         self.n_emb = config.n_emb
-        self.set_emb_weights(emb_weights)
-    def set_emb_weights(self,emb_weights):
+        self.set_embedding_weights(emb_weights)
+    def set_embedding_weights(self,emb_weights):
         shape = emb_weights.shape
         self.embed = nn.Linear(shape[1],shape[0], bias=False)
         self.embed.weight = emb_weights
@@ -168,4 +168,11 @@ class Heads_Model():
     def set_tied(self): ### TODO what tied weights do
         self.head.set_emb_weights(self.model.wte.weight)
 
-    def forward(self, input_ids, position_ids=None, token_type = None, lables = None, past=None):
+    def forward(self, input_ids, position_ids=None, token_type = None, labels = None, past=None):
+        hidden_states, presents = self.transformer(input_ids, position_ids, token_type, past)
+        lm_logits = self.lm_head(hidden_states)
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
+            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
+            return loss
+        return lm_logits, presents
