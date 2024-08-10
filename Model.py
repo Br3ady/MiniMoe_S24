@@ -96,17 +96,17 @@ class Block(nn.Module):
         x = self.ln_2(m+x)
 
 
-class Model(nn.Module): ## GPT architecture 
+class GPT2Model(nn.Module):
     def __init__(self, config):
-        super(Model, self).__init__()
+        super(GPT2Model, self).__init__()
         self.n_layer = config.n_layer
         self.n_embd = config.n_embd
         self.n_vocab = config.vocab_size
 
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd) # learnable weight matrix that can contain all embeddings
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd) # weights like x
+        self.wte = nn.Embedding(config.vocab_size, config.n_embd) 
+        self.wpe = nn.Embedding(config.n_positions, config.n_embd) 
         block = Block(config.n_ctx, config, scale=True)
-        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)])
+        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)]) 
         self.ln_f = LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
     def set_embeddings_weights(self, model_embeddings_weights):
@@ -114,7 +114,7 @@ class Model(nn.Module): ## GPT architecture
         self.decoder = nn.Linear(embed_shape[1], embed_shape[0], bias=False)
         self.decoder.weight = model_embeddings_weights  # Tied weights
 
-    def forward(self, input_ids, position_ids=None):
+    def forward(self, input_ids, position_ids=None, token_type_ids=None, past=None):
         if past is None:
             past_length = 0
             past = [None] * len(self.h)
@@ -124,45 +124,49 @@ class Model(nn.Module): ## GPT architecture
             position_ids = torch.arange(past_length, input_ids.size(-1) + past_length, dtype=torch.long,
                                         device=input_ids.device)
             position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_ids.size(-1))
         position_ids = position_ids.view(-1, position_ids.size(-1))
 
-        inputs_embeds = self.wte(input_ids) ## get input emb for vocab through lin proj
-        position_embeds = self.wpe(position_ids) ## ^^ for position emb 
-        if token_type_ids is not None: 
+        inputs_embeds = self.wte(input_ids)
+        position_embeds = self.wpe(position_ids)
+        if token_type_ids is not None:
             token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1))
             token_type_embeds = self.wte(token_type_ids)
         else:
             token_type_embeds = 0
-        hidden_states = inputs_embeds + position_embeds + token_type_embeds # sum all projections to get input
+        hidden_states = inputs_embeds + position_embeds + token_type_embeds
         presents = []
         for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
         hidden_states = self.ln_f(hidden_states)
         output_shape = input_shape + (hidden_states.size(-1),)
-        return hidden_states.view(*output_shape), presents    
-    
+        return hidden_states.view(*output_shape), presents
 
-class Head():
-    def __inti__(self, emb_weights, config):
-        super(Head, self).__inti__()
-        self.n_emb = config.n_emb
-        self.set_embedding_weights(emb_weights)
-    def set_embedding_weights(self,emb_weights):
-        shape = emb_weights.shape
-        self.embed = nn.Linear(shape[1],shape[0], bias=False)
-        self.embed.weight = emb_weights
-    def forward(self, hidden):
-        return self.embed(hidden)
+class GPT2LMHead(nn.Module):
+    def __init__(self, model_embeddings_weights, config):
+        super(GPT2LMHead, self).__init__()
+        self.n_embd = config.n_embd
+        self.set_embeddings_weights(model_embeddings_weights)
 
+    def set_embeddings_weights(self, model_embeddings_weights):
+        embed_shape = model_embeddings_weights.shape
+        self.decoder = nn.Linear(embed_shape[1], embed_shape[0], bias=False)
+        self.decoder.weight = model_embeddings_weights  # Tied weights
 
-class Heads_Model():
+    def forward(self, hidden_state):
+        # Truncated Language modeling logits (we remove the last token)
+        # h_trunc = h[:, :-1].contiguous().view(-1, self.n_embd)
+        lm_logits = self.decoder(hidden_state)
+        return lm_logits
+
+class GPT2LMHeadModel(nn.Module):
     def __init__(self, config):
-        super(Heads_Model, self).__init__()
-        self.transformer = Model(config)
-        self.lm_head = Head(self.transformer.wte.weight, config)
+        super(GPT2LMHeadModel, self).__init__()
+        self.transformer = GPT2Model(config)
+        self.lm_head = GPT2LMHead(self.transformer.wte.weight, config)
 
     def set_tied(self):
         self.lm_head.set_embeddings_weights(self.transformer.wte.weight)
@@ -175,4 +179,7 @@ class Heads_Model():
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), lm_labels.view(-1))
             return loss
         return lm_logits, presents
+    
+
+
     
