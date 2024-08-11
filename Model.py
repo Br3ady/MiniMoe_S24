@@ -96,34 +96,29 @@ class Block(nn.Module):
         x = self.ln_2(m+x)
 
 
-class GPT2Model(nn.Module):
+class Model(nn.Module): ## GPT architecture 
     def __init__(self, config):
-        super(GPT2Model, self).__init__()
+        super(Model, self).__init__()
         self.n_layer = config.n_layer
         self.n_embd = config.n_embd
         self.n_vocab = config.vocab_size
 
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd) 
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd) 
+        self.wte = nn.Embedding(config.vocab_size, config.n_embd) # lookup tabel vocab -> learnable_embeddings
+        self.wpe = nn.Embedding(config.n_positions, config.n_embd) # ^^ 
         block = Block(config.n_ctx, config, scale=True)
-        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)]) 
+        self.h = nn.ModuleList([copy.deepcopy(block) for _ in range(config.n_layer)]) # new copy of blocks
         self.ln_f = LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
-    def set_embeddings_weights(self, model_embeddings_weights):
-        embed_shape = model_embeddings_weights.shape
-        self.decoder = nn.Linear(embed_shape[1], embed_shape[0], bias=False)
-        self.decoder.weight = model_embeddings_weights  # Tied weights
-
-    def forward(self, input_ids, position_ids=None, token_type_ids=None, past=None):
+    def forward(self, input_ids, past):
         if past is None:
             past_length = 0
             past = [None] * len(self.h)
         else:
             past_length = past[0][0].size(-2)
-        if position_ids is None:
-            position_ids = torch.arange(past_length, input_ids.size(-1) + past_length, dtype=torch.long,
-                                        device=input_ids.device)
-            position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+
+        position_ids = torch.arange(past_length, input_ids.size(-1) + past_length, dtype=torch.long,
+                                    device=input_ids.device)
+        position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
 
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_ids.size(-1))
@@ -131,13 +126,12 @@ class GPT2Model(nn.Module):
 
         inputs_embeds = self.wte(input_ids)
         position_embeds = self.wpe(position_ids)
-        if token_type_ids is not None:
-            token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1))
-            token_type_embeds = self.wte(token_type_ids)
-        else:
-            token_type_embeds = 0
+
+        token_type_embeds = 0
+        
         hidden_states = inputs_embeds + position_embeds + token_type_embeds
         presents = []
+
         for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
@@ -145,36 +139,36 @@ class GPT2Model(nn.Module):
         output_shape = input_shape + (hidden_states.size(-1),)
         return hidden_states.view(*output_shape), presents
 
-class GPT2LMHead(nn.Module):
+
+class Head(nn.Module): ## head to decode ffn output to logits over vocab 
     def __init__(self, model_embeddings_weights, config):
-        super(GPT2LMHead, self).__init__()
+        super(Head, self).__init__()
         self.n_embd = config.n_embd
         self.set_embeddings_weights(model_embeddings_weights)
 
     def set_embeddings_weights(self, model_embeddings_weights):
         embed_shape = model_embeddings_weights.shape
-        self.decoder = nn.Linear(embed_shape[1], embed_shape[0], bias=False)
+        self.decoder = nn.Linear(embed_shape[1], embed_shape[0], bias=False) # essentially similarity measure between output sequence and token embeddings 
         self.decoder.weight = model_embeddings_weights  # Tied weights
 
     def forward(self, hidden_state):
-        # Truncated Language modeling logits (we remove the last token)
-        # h_trunc = h[:, :-1].contiguous().view(-1, self.n_embd)
         lm_logits = self.decoder(hidden_state)
         return lm_logits
 
-class GPT2LMHeadModel(nn.Module):
+
+class GPT(nn.Module): ## Model + Head
     def __init__(self, config):
-        super(GPT2LMHeadModel, self).__init__()
-        self.transformer = GPT2Model(config)
-        self.lm_head = GPT2LMHead(self.transformer.wte.weight, config)
+        super(GPT, self).__init__()
+        self.transformer = Model(config)
+        self.lm_head = Head(self.transformer.wte.weight, config)
 
     def set_tied(self):
         self.lm_head.set_embeddings_weights(self.transformer.wte.weight)
 
-    def forward(self, input_ids, position_ids=None, token_type_ids=None, lm_labels=None, past=None):
-        hidden_states, presents = self.transformer(input_ids, position_ids, token_type_ids, past)
+    def forward(self, input_ids, past, lm_labels=None):
+        hidden_states, presents = self.transformer(input_ids, past)
         lm_logits = self.lm_head(hidden_states)
-        if lm_labels is not None:
+        if lm_labels is not None: # Training
             loss_fct = nn.CrossEntropyLoss(ignore_index=-1)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), lm_labels.view(-1))
             return loss
