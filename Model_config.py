@@ -5,7 +5,7 @@ class Config(object):
             n_positions=1024,
             n_ctx=1024,
             n_embd=768,
-            n_layer=12,
+            n_layer=3,
             n_head=12,
             layer_norm_epsilon=1e-5,
             initializer_range=0.02,
