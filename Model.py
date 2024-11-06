@@ -26,7 +26,7 @@ class Attn(nn.Module):
         self.h = config.n_head #number of attn heads (div along d)
         assert self.d % self.h == 0 #make sure div equally
         self.W1 = nn.Linear(self.d,3*self.d) #for expanding input [B,N,D] into q,k,v like x
-        self.W2 = nn.Linear(self.d,self.d) ### more learnable params, no shape change
+        self.out_proj = nn.Linear(self.d,self.d) ### more learnable params, no shape change
 
     def reshape(self, x, k=False):
         in_shape = x.size()[:-1] + (self.h, self.d // self.h) #[B,N,D] -> [B,N,H,D/H] i.e div emb into heads
@@ -38,12 +38,14 @@ class Attn(nn.Module):
         return x
     
     def cat(self, x):
-        out_shape = (x.size()[0],) + (x.size()[3],) + (x.size()[2]*x.size()[1],) #[B,H,D/H,N] -> [B,N,D] return to shape and cat last 2 dims
+        out_shape = (x.size()[0],) + (x.size()[2],) + (x.size()[3]*x.size()[1],) #[B,H,D/H,N] -> [B,N,D] return to shape and cat last 2 dims
         x = x.view(out_shape)
         return x
 
-    def heads(self, q,k,v):
+    def heads(self, q,k,v, mask=None):
         w = (torch.matmul(q,k)) / math.sqrt(q.size(-1)) #ATTN calc 
+        if mask is not None:
+            w = w.masked_fill(mask==0,float('-inf')) #upper right mask 
         w = nn.Softmax(dim=-1)(w)
         return torch.matmul(w,v)
 
@@ -53,7 +55,6 @@ class Attn(nn.Module):
         q = self.reshape(Q) # to mult shapes
         k = self.reshape(K,k=True)
         v = self.reshape(V)
-
         if layer_past is not None:
             past_k, past_v = layer_past
             k = torch.cat([past_k, k], dim=-1) # dim -1 since k is always transposed so N is last
@@ -62,17 +63,20 @@ class Attn(nn.Module):
                 k = k[:, :, :, -self.n_ctx:]
                 v = v[:, :, -self.n_ctx:, :]
 
-        layer_present = torch.stack((k,v)) #save updated k,v (wont be used during training)
-        out = self.heads(q,k,v) #do ATTN
-        out = self.cat(out) #combine heads
-        return self.W2(out), layer_present 
+        layer_present = (k,v) #save updated k,v (wont be used during training)
+        _,_,N,_ = q.size()
+        mask = torch.tril(torch.ones((N,N), device=q.device)).view(1,1,N,N) ### TODO why shape
+        out1 = self.heads(q,k,v, mask=mask) #do ATTN
+        out2 = self.cat(out1) #combine heads
+        return self.out_proj(out2), layer_present 
+
 
 class FFN(nn.Module):
     def __init__(self, config): 
         super(FFN, self).__init__()
         d = config.n_embd
         hidden = d*4 #good ratio (scale more for wider model)
-        self.c_fc = nn.Linear(d, hidden)
+        self.ln_1 = nn.Linear(d, hidden)
         self.c_proj = nn.Linear(hidden, d)
         self.act = nn.SiLU()
 
@@ -85,10 +89,10 @@ class FFN(nn.Module):
 class Block(nn.Module):
     def __init__(self, config):
         super(Block, self).__init__()
-        self.FFN = FFN(config)
+        self.ln_1 = LayerNorm(config.n_embd)
         self.ATTN = Attn(config)
-        self.ln_1 = LayerNorm(config.n_emb)
-        self.ln_2 = LayerNorm(config.n_emb)
+        self.ln_2 = LayerNorm(config.n_embd)
+        self.FFN = FFN(config)
 
     def forward(self, x, layer_past):
         a, layer_present = self.ATTN(x,layer_past) #past -> present
@@ -98,10 +102,15 @@ class Block(nn.Module):
         return x, layer_present #pass out for appending to total past
 
 
+
+##### NOT USED FOR SPLIT TRAINING ##### 
+
+
+
 class Model(nn.Module):  
     def __init__(self, config):
         super(Model, self).__init__()
-        self.n_layer = config.n_layer ###low per client (net 4)
+        self.n_layer = config.n_layer 
         self.n_embd = config.n_embd
         self.n_vocab = config.vocab_size ###ensure match w/ tokenizer
 
@@ -170,3 +179,4 @@ class GPT(nn.Module): ## Model + Head
         hidden_states, presents = self.transformer(input_ids, past)
         lm_logits = self.lm_head(hidden_states)
         return lm_logits, presents #passed in as past in next forward pass (store in inference loop useless in training)
+

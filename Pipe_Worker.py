@@ -4,39 +4,60 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from Model_config import Config
+from Clients import Client1
+
+
+
+def encode(data, flag, dest_id):
+     buffer = io.BytesIO()
+     torch.save((data, flag, dest_id), buffer)
+     buffer.seek(0)
+     return buffer.getvalue()
+
+
+def decode(byte_data):
+    buffer = io.BytesIO(byte_data)
+    tensor, flag, dest_id = torch.load(buffer)
+    return tensor, flag, dest_id
 
 
 context = zmq.Context()
 worker = context.socket(zmq.DEALER)
-worker.setsockopt_string(zmq.IDENTITY, "worker_1")
-worker.connect("tcp://127.0.0.1:5555")
+worker.setsockopt(zmq.IDENTITY, b"1")
+worker.connect("tcp://127.0.0.1:5555") ###change to tunnel
+config = Config()
+Model = Client1(config)
+optimizer = optim.Adam(Model.parameters(), lr=0.001)
 
-
-class Custom_Mult(nn.Module):
-  def __init__(self, N):
-    super(Custom_Mult, self).__init__()
-    X = torch.rand(N,N, requires_grad=True)
-    self.X = nn.Parameter(X)
-
-  def forward(self, A, B):
-    assert A.size()[1] == self.X.size()[0] == B.size()[0]
-    mult = A @ self.X @ B
-    out = mult.sum()
-    return out
-
-model = Custom_Mult(N=250)
-optimizer = optim.Adam(model.parameters())
-print("Connected...")
-
+state_dict = Model.state_dict()
+for key, value in state_dict.items():
+    print(key, "     ", list(value.shape))
+    print("\n", end="")
+        
+breakpoint()
 
 while True:
-    data_message = worker.recv_multipart()
-    A_batch,B_batch,Targets = [torch.load(io.BytesIO(tensor)) for tensor in data_message]
-    outs = model(A_batch)
-    loss = loss(outs)
-    loss.backward()
-    optimizer.step()
-    
+    try:
+        byte_data = worker.recv_multipart()[0] ### dont technically need multipart send [0] is workaround 
+        tensor,flag,dest_id = decode(byte_data)
 
-    # worker.send_multipart([str(out).encode()])
-    # print("Output Sent")
+        if flag == 0:
+            out = Model(tensor)
+        if flag == 1:
+            tensor.backwards()
+
+        if flag == 2:
+            pass #shuttle data to back pass
+        if flag == 3:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        if flag == 4: ### TODO for loading checkpoints
+            state_dict = tensor
+            Model.load_state_dict(state_dict,strict=False)
+        message = encode(out,flag,dest_id)
+        worker.send_multipart([message])
+
+    except zmq.Again:
+        pass

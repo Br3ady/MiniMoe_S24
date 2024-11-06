@@ -5,25 +5,33 @@ import torch.optim as optim
 from torch.utils.data import Dataset
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from Model_config import Config
+import Model
 
-
-dataset = load_dataset("Skylion007/openwebtext")
-train_set = dataset['train']
-tokenizer = AutoTokenizer.from_pretrained("gpt2") ### HF gives tokenier for model 
-
-def tokenize(dataset):
-    return tokenizer(dataset['text'], )
 
 class OpenWebText(Dataset):
-    def __init__(self, path, L):
+    def __init__(self, config, tokenizer, token_set):
         super(OpenWebText,self).__init__()
-        self.data = dataset.load_from_disk(path)
-        
-        self.L = L
+        self.data = token_set
+        self.tokenizer = tokenizer
+        self.seq_len = config.n_ctx
 
     def __len__(self): 
-        return(self.L)
+        return len(self.data)
     
     def __getitem__(self, idx):
-        x = self.data[idx:idx+self.L]
-        y = self.data[idx+1: idx + 1 + self.block_size]
+        # Get the tokenized input_ids
+        input_ids = self.data["input_ids"][idx]
+
+        # Truncate or pad the input_ids to the desired sequence length
+        input_ids = input_ids[:self.seq_len]
+        if len(input_ids) < self.seq_len:
+            input_ids += [self.tokenizer.pad_token_id] * (self.seq_len - len(input_ids))
+
+        # Input is the token sequence, target is the shifted sequence
+        input_ids = torch.tensor(input_ids, dtype=torch.long)
+        target_ids = input_ids.clone()
+        target_ids[:-1] = input_ids[1:]  # Shifted target
+
+        return {"input_ids": input_ids, "labels": target_ids}
+
