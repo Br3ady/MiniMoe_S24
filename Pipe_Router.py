@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import io
 import queue
 import threading
+import multiprocessing
 from test_trainset import OpenWebText
 from torch.utils.data import DataLoader
 from transformers import GPT2TokenizerFast
@@ -40,6 +41,7 @@ def forward_thread_func():
             message_bytes = encode(data,flag,dest_id)
             dest_bytes = str(dest_id).encode('utf-8')
             router.send_multipart([dest_bytes, message_bytes])
+            print("Sent 0 !!!!!")
         except queue.Empty:
             pass
 
@@ -64,6 +66,7 @@ def listen_thread_func():
         data,flag,dest_id = decode(received_bytes)
 
         if flag == 0:
+            print("recived 0")
             if dest_id < num_clients: # client_id is 1 idx, recived from client 4 : dest = 4 and needs reversal 
                 dest_id += 1 # if recived form 2, prep for sending to 3
                 forward_queue.put((data, flag, dest_id)) #keep forwarding
@@ -75,6 +78,7 @@ def listen_thread_func():
                 backward_queue.put((loss, flag, dest_id))
 
         if flag == 1:
+            print("Recived 1")
             if dest_id > 1:
                 dest_id -= 1
                 backward_queue.put((data, flag, dest_id))
@@ -102,10 +106,13 @@ def listen_thread_func():
 
 def dataloader_thread_func():
     i=1
+    print("loading")
     for microbatch in dataloader:
         i+=1
         if i % (batch_size/micro_batch_size) != 0: 
-            init_data = (microbatch,0,1) #set init data (_, forward_flag, to_client_1)
+            init_data = (microbatch["input_ids"],0,1) #set init data (_, forward_flag, to_client_1)
+            target_data = (microbatch["labels"])
+            target_queue.put(target_data)
             forward_queue.put(init_data)
         else:
             update_token = (0,2,1) 
@@ -114,12 +121,13 @@ def dataloader_thread_func():
             next_batch_event.clear()
 
 
-### TODO Not complete 
-### for init loding different model checkpoints # change nampes / comb per type 
-def load_checpoint_init(path): # "gpt_model_checkpoint.pth" 
+### TODO Not complete  // turn to tractable functions and forward 
+### for init loding different model checkpoints # change per model type and ensure layer size match
+def load_checpoint(path): # "gpt_model_checkpoint.pth" 
     state_dict = torch.load(path) 
     client_dicts = [{} for _ in range(num_clients)] # for sub_dicts
 
+    ### split into clients
     for name, param in state_dict.items():
         if name.startswith("transformer.h"):
 
@@ -130,6 +138,18 @@ def load_checpoint_init(path): # "gpt_model_checkpoint.pth"
             for client_dict in client_dicts:
                 client_dict[name] = param
 
+
+
+    ### combine q,k,v proj
+    for client_dict in client_dicts: ### each client dict 
+        q_large, k_large, v_large = [],[],[] 
+        for key,value in client_dict.items(): # add each 
+            if key.endswith("attn.attention.q_proj.weight"):
+                q_large.append(key)
+            
+
+
+    ### itt and print for comp
     for i,client_dict in enumerate(client_dicts):
         
         for key,value in client_dict.items():
@@ -186,4 +206,8 @@ if __name__ == "__main__":
     print("Running...")
 
 
-    load_checpoint_init("gpt_model_checkpoint.pth")
+    thread_dataloader.start()
+    thread_forward.start()
+    thread_listen.start()
+    thread_backward.start()
+    print("threadin")

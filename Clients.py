@@ -35,14 +35,14 @@ class Client1(nn.Module):
     def forward(self, input_ids, past=None, batch_id=None):
         if past is None:
             past_length = 0
-            past = [None] * len(self.blocks) #init past per block
+            past = [None] * len(self.h) #init past per block
         else: 
             past_length = past[0][0].size(-1)
 
         hidden_states = self.embed_tokens(input_ids, past_length)
     
         presents = []
-        for block, layer_past in zip(self.blocks, past):
+        for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
 
@@ -70,12 +70,12 @@ class Client2(nn.Module):
     def forward(self, hidden_states, past=None, batch_id=None):
         if past is None:
             past_length = 0
-            past = [None] * len(self.blocks) #init past per block
+            past = [None] * len(self.h) #init past per block
         else: 
             past_length = past[0][0].size(-1)
 
         presents = []
-        for block, layer_past in zip(self.blocks, past):
+        for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
 
@@ -105,12 +105,12 @@ class Client3(nn.Module):
     def forward(self, hidden_states, past=None, batch_id=None):
         if past is None:
             past_length = 0
-            past = [None] * len(self.blocks) #init past per block
+            past = [None] * len(self.h) #init past per block
         else: 
             past_length = past[0][0].size(-1)
 
         presents = []
-        for block, layer_past in zip(self.blocks, past):
+        for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
 
@@ -141,12 +141,12 @@ class Client4(nn.Module):
     def forward(self, hidden_states, past=None, batch_id=None):
         if past is None:
             past_length = 0
-            past = [None] * len(self.blocks) #init past per block
+            past = [None] * len(self.h) #init past per block
         else: 
             past_length = past[0][0].size(-1)
         
         presents = []
-        for block, layer_past in zip(self.blocks, past):
+        for block, layer_past in zip(self.h, past):
             hidden_states, present = block(hidden_states, layer_past)
             presents.append(present)
         hidden_states = self.ln_f(hidden_states)

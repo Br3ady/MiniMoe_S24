@@ -81,7 +81,7 @@ class FFN(nn.Module):
         self.act = nn.SiLU()
 
     def forward(self, x):
-        x = self.act(self.c_fc(x)) #A.E for compexity learning
+        x = self.act(self.ln_1(x)) #A.E for compexity learning
         x = self.c_proj(x)
         return x
     
